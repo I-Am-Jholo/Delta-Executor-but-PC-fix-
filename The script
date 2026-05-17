@@ -1,0 +1,1593 @@
+--[=[
+    Delta Executor UI - Full Rewrite
+    Bugs fixed + all tabs working + scripts folder + config color customizer
+]=]
+
+-- ══════════════════════════════════════════════
+--  SERVICES
+-- ══════════════════════════════════════════════
+local Players       = game:GetService("Players")
+local TweenService  = game:GetService("TweenService")
+local UIS           = game:GetService("UserInputService")
+local RunService    = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
+
+-- Kill old GUI if re-injected
+if PlayerGui:FindFirstChild("DeltaExecutorGui") then
+    PlayerGui:FindFirstChild("DeltaExecutorGui"):Destroy()
+end
+
+-- ══════════════════════════════════════════════
+--  THEME (mutable so CONFIG tab can change it)
+-- ══════════════════════════════════════════════
+local THEME = {
+    BG_OUTER       = Color3.fromRGB(18, 22, 30),
+    BG_SIDEBAR     = Color3.fromRGB(22, 27, 37),
+    BG_PANEL       = Color3.fromRGB(25, 31, 42),
+    BG_EDITOR      = Color3.fromRGB(20, 25, 34),
+    BG_TABBAR      = Color3.fromRGB(20, 25, 34),
+    BG_ACTIVETAB   = Color3.fromRGB(30, 38, 52),
+    BG_LINENOS     = Color3.fromRGB(22, 27, 37),
+    BG_FILTER      = Color3.fromRGB(28, 34, 46),
+    BG_BTN         = Color3.fromRGB(30, 38, 52),
+    BG_BTNBLUE     = Color3.fromRGB(41, 98, 196),
+    BG_BOTTOMBAR   = Color3.fromRGB(20, 25, 34),
+    BG_TITLEBAR    = Color3.fromRGB(16, 20, 28),
+    ACCENT         = Color3.fromRGB(80, 140, 255),
+    ACCENT_DIM     = Color3.fromRGB(50, 75, 140),
+    BORDER         = Color3.fromRGB(35, 45, 65),
+    BORDER_ACCENT  = Color3.fromRGB(60, 90, 160),
+    CLOSE          = Color3.fromRGB(220, 70, 70),
+    WIN_BTN        = Color3.fromRGB(55, 65, 90),
+    TEXT_PRIMARY   = Color3.fromRGB(220, 228, 255),
+    TEXT_DIM       = Color3.fromRGB(110, 130, 170),
+    TEXT_LINENO    = Color3.fromRGB(75, 95, 135),
+    TEXT_WHITE     = Color3.fromRGB(240, 245, 255),
+    TEXT_SIDEBAR   = Color3.fromRGB(130, 150, 190),
+    TEXT_TABNAME   = Color3.fromRGB(195, 210, 240),
+    CODE           = Color3.fromRGB(210, 220, 240),
+}
+
+-- ══════════════════════════════════════════════
+--  HELPERS
+-- ══════════════════════════════════════════════
+local function corner(p, r)
+    local c = Instance.new("UICorner", p)
+    c.CornerRadius = UDim.new(0, r or 4)
+    return c
+end
+
+local function stroke(p, col, thick)
+    local s = Instance.new("UIStroke", p)
+    s.Color = col or THEME.BORDER
+    s.Thickness = thick or 1
+    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    return s
+end
+
+local function pad(p, t, b, l, r)
+    local u = Instance.new("UIPadding", p)
+    u.PaddingTop    = UDim.new(0, t or 0)
+    u.PaddingBottom = UDim.new(0, b or 0)
+    u.PaddingLeft   = UDim.new(0, l or 0)
+    u.PaddingRight  = UDim.new(0, r or 0)
+end
+
+local function listLayout(p, dir, halign, valign, spacing)
+    local l = Instance.new("UIListLayout", p)
+    l.FillDirection       = dir    or Enum.FillDirection.Vertical
+    l.HorizontalAlignment = halign or Enum.HorizontalAlignment.Left
+    l.VerticalAlignment   = valign or Enum.VerticalAlignment.Top
+    l.Padding             = UDim.new(0, spacing or 0)
+    return l
+end
+
+local function hover(btn, norm, hi)
+    btn.MouseEnter:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.1), {BackgroundColor3 = hi}):Play()
+    end)
+    btn.MouseLeave:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.1), {BackgroundColor3 = norm}):Play()
+    end)
+end
+
+local function clickFlash(btn, norm)
+    btn.MouseButton1Down:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.06), {BackgroundColor3 = Color3.fromRGB(55, 105, 215)}):Play()
+    end)
+    btn.MouseButton1Up:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = norm}):Play()
+    end)
+end
+
+-- ══════════════════════════════════════════════
+--  ROOT SCREENGUI
+-- ══════════════════════════════════════════════
+local ScreenGui = Instance.new("ScreenGui", PlayerGui)
+ScreenGui.Name           = "DeltaExecutorGui"
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.ResetOnSpawn   = false
+ScreenGui.DisplayOrder   = 999
+
+-- ══════════════════════════════════════════════
+--  MAIN WINDOW
+-- ══════════════════════════════════════════════
+local Window = Instance.new("Frame", ScreenGui)
+Window.Name             = "Window"
+Window.AnchorPoint      = Vector2.new(0.5, 0.5)
+Window.Position         = UDim2.new(0.5, 0, 0.5, 0)
+Window.BackgroundColor3 = THEME.BG_OUTER
+Window.BorderSizePixel  = 0
+Window.ClipsDescendants = true
+corner(Window, 8)
+stroke(Window, THEME.BORDER_ACCENT, 1.5)
+
+-- Base size is 20% smaller than original (720->576, 480->384)
+local BASE_W, BASE_H = 576, 384
+
+local function scaleWindow()
+    local vp    = workspace.CurrentCamera.ViewportSize
+    local scale = math.min(
+        math.clamp(vp.X / 640, 0.34, 1),
+        math.clamp(vp.Y / 430, 0.34, 1)
+    )
+    Window.Size = UDim2.new(0, math.floor(BASE_W * scale), 0, math.floor(BASE_H * scale))
+end
+scaleWindow()
+workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(scaleWindow)
+
+-- Drop shadow
+local Shadow = Instance.new("Frame", ScreenGui)
+Shadow.AnchorPoint            = Vector2.new(0.5, 0.5)
+Shadow.BackgroundColor3       = Color3.new(0, 0, 0)
+Shadow.BackgroundTransparency = 0.55
+Shadow.BorderSizePixel        = 0
+Shadow.ZIndex                 = 0
+corner(Shadow, 12)
+RunService.RenderStepped:Connect(function()
+    Shadow.Position = UDim2.new(
+        Window.Position.X.Scale, Window.Position.X.Offset + 6,
+        Window.Position.Y.Scale, Window.Position.Y.Offset + 8)
+    Shadow.Size = UDim2.new(0, Window.AbsoluteSize.X + 16, 0, Window.AbsoluteSize.Y + 16)
+end)
+
+-- ══════════════════════════════════════════════
+--  TITLE BAR
+-- ══════════════════════════════════════════════
+local TitleBar = Instance.new("Frame", Window)
+TitleBar.Name             = "TitleBar"
+TitleBar.Size             = UDim2.new(1, 0, 0, 32)
+TitleBar.BackgroundColor3 = THEME.BG_TITLEBAR
+TitleBar.BorderSizePixel  = 0
+TitleBar.ZIndex           = 5
+
+-- Square off bottom of rounded titlebar
+local TBSquare = Instance.new("Frame", TitleBar)
+TBSquare.Size             = UDim2.new(1, 0, 0.5, 0)
+TBSquare.Position         = UDim2.new(0, 0, 0.5, 0)
+TBSquare.BackgroundColor3 = THEME.BG_TITLEBAR
+TBSquare.BorderSizePixel  = 0
+TBSquare.ZIndex           = 5
+
+-- App icon (Delta logo)
+local AppIcon = Instance.new("ImageLabel", TitleBar)
+AppIcon.Image             = "rbxassetid://12730597972"
+AppIcon.Size              = UDim2.new(0, 24, 0, 24)
+AppIcon.Position          = UDim2.new(0, 6, 0.5, -12)
+AppIcon.BackgroundColor3  = Color3.fromRGB(255, 255, 255)
+AppIcon.BackgroundTransparency = 0.9
+AppIcon.BorderSizePixel   = 0
+AppIcon.ZIndex            = 6
+AppIcon.ScaleType         = Enum.ScaleType.Fit
+corner(AppIcon, 4)
+
+local TitleText = Instance.new("TextLabel", TitleBar)
+TitleText.Text             = "Delta"
+TitleText.TextSize         = 13
+TitleText.Font             = Enum.Font.GothamBold
+TitleText.TextColor3       = THEME.TEXT_DIM
+TitleText.BackgroundTransparency = 1
+TitleText.Size             = UDim2.new(0, 80, 1, 0)
+TitleText.Position         = UDim2.new(0, 36, 0, 0)
+TitleText.TextXAlignment   = Enum.TextXAlignment.Left
+TitleText.ZIndex           = 6
+
+local function makeTitleBtn(txt, xOff, hoverCol)
+    local b = Instance.new("TextButton", TitleBar)
+    b.Text             = txt
+    b.TextSize         = 11
+    b.Font             = Enum.Font.GothamBold
+    b.TextColor3       = THEME.TEXT_DIM
+    b.BackgroundColor3 = THEME.WIN_BTN
+    b.Size             = UDim2.new(0, 24, 0, 20)
+    b.Position         = UDim2.new(1, xOff, 0.5, -10)
+    b.AutoButtonColor  = false
+    b.BorderSizePixel  = 0
+    b.ZIndex           = 6
+    corner(b, 4)
+    hover(b, THEME.WIN_BTN, hoverCol)
+    return b
+end
+local BtnClose    = makeTitleBtn("✕", -30, THEME.CLOSE)
+local _BtnMaximize = makeTitleBtn("□", -58, Color3.fromRGB(50, 70, 110))
+local BtnMinimize = makeTitleBtn("─", -86, Color3.fromRGB(50, 70, 110))
+
+BtnClose.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+
+local minimized  = false
+local savedSize
+BtnMinimize.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        savedSize = Window.Size
+        TweenService:Create(Window, TweenInfo.new(0.18), {
+            Size = UDim2.new(0, Window.AbsoluteSize.X, 0, 32)
+        }):Play()
+    else
+        TweenService:Create(Window, TweenInfo.new(0.18), {
+            Size = savedSize or UDim2.new(0, 720, 0, 480)
+        }):Play()
+    end
+end)
+
+-- ══════════════════════════════════════════════
+--  ICON BUTTON  (shown when window snaps to edge)
+-- ══════════════════════════════════════════════
+local ICON_SIZE   = 48   -- px, the collapsed bubble size
+local EDGE_THRESH = 60   -- px from edge to trigger snap
+
+local IconBtn = Instance.new("ImageButton", ScreenGui)
+IconBtn.Name              = "IconBtn"
+IconBtn.Image             = "rbxassetid://12730597972"
+IconBtn.Size              = UDim2.new(0, ICON_SIZE, 0, ICON_SIZE)
+IconBtn.Position          = UDim2.new(0, 8, 0.5, -ICON_SIZE/2)
+IconBtn.BackgroundColor3  = THEME.BG_SIDEBAR
+IconBtn.BorderSizePixel   = 0
+IconBtn.Visible           = false
+IconBtn.ZIndex            = 100
+IconBtn.ScaleType         = Enum.ScaleType.Fit
+corner(IconBtn, ICON_SIZE / 2)
+stroke(IconBtn, THEME.ACCENT, 2)
+
+-- Subtle shadow behind icon
+local IconShadow = Instance.new("Frame", ScreenGui)
+IconShadow.Name              = "IconShadow"
+IconShadow.AnchorPoint       = Vector2.new(0.5, 0.5)
+IconShadow.BackgroundColor3  = Color3.new(0,0,0)
+IconShadow.BackgroundTransparency = 0.5
+IconShadow.BorderSizePixel   = 0
+IconShadow.Size              = UDim2.new(0, ICON_SIZE+10, 0, ICON_SIZE+10)
+IconShadow.Visible           = false
+IconShadow.ZIndex            = 99
+corner(IconShadow, (ICON_SIZE+10)/2)
+
+local isIconMode = false
+
+local function enterIconMode()
+    if isIconMode then return end
+    isIconMode = true
+    -- Place icon at the nearest edge position
+    local vp  = workspace.CurrentCamera.ViewportSize
+    local wx  = Window.AbsolutePosition.X + Window.AbsoluteSize.X / 2
+    local wy  = Window.AbsolutePosition.Y + Window.AbsoluteSize.Y / 2
+    -- Pick closest edge side
+    local distLeft   = wx
+    local distRight  = vp.X - wx
+    local distTop    = wy
+    local distBottom = vp.Y - wy
+    local minDist    = math.min(distLeft, distRight, distTop, distBottom)
+
+    local iconX, iconY
+    if minDist == distLeft then
+        iconX = 8
+        iconY = math.clamp(wy - ICON_SIZE/2, 8, vp.Y - ICON_SIZE - 8)
+    elseif minDist == distRight then
+        iconX = vp.X - ICON_SIZE - 8
+        iconY = math.clamp(wy - ICON_SIZE/2, 8, vp.Y - ICON_SIZE - 8)
+    elseif minDist == distTop then
+        iconX = math.clamp(wx - ICON_SIZE/2, 8, vp.X - ICON_SIZE - 8)
+        iconY = 8
+    else
+        iconX = math.clamp(wx - ICON_SIZE/2, 8, vp.X - ICON_SIZE - 8)
+        iconY = vp.Y - ICON_SIZE - 8
+    end
+
+    IconBtn.Position    = UDim2.new(0, iconX, 0, iconY)
+    IconShadow.Position = UDim2.new(0, iconX + ICON_SIZE/2, 0, iconY + ICON_SIZE/2)
+
+    -- Shrink + fade window, show icon
+    TweenService:Create(Window, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
+        BackgroundTransparency = 1
+    }):Play()
+    Shadow.Visible = false
+    task.delay(0.15, function()
+        Window.Visible = false
+    end)
+    IconBtn.BackgroundTransparency = 1
+    IconShadow.BackgroundTransparency = 1
+    IconBtn.Visible    = true
+    IconShadow.Visible = true
+    TweenService:Create(IconBtn,    TweenInfo.new(0.2), {BackgroundTransparency = 0}):Play()
+    TweenService:Create(IconShadow, TweenInfo.new(0.2), {BackgroundTransparency = 0.5}):Play()
+end
+
+local function exitIconMode()
+    if not isIconMode then return end
+    isIconMode = false
+    -- Restore window at icon position, centered
+    local vp  = workspace.CurrentCamera.ViewportSize
+    local ix  = IconBtn.AbsolutePosition.X + ICON_SIZE/2
+    local iy  = IconBtn.AbsolutePosition.Y + ICON_SIZE/2
+    -- Clamp so window stays fully on screen
+    local ww  = Window.AbsoluteSize.X
+    local wh  = Window.AbsoluteSize.Y
+    local wx  = math.clamp(ix - ww/2, 8, vp.X - ww - 8)
+    local wy  = math.clamp(iy - wh/2, 8, vp.Y - wh - 8)
+    Window.Position = UDim2.new(0, wx, 0, wy)
+    Window.BackgroundTransparency = 1
+    Window.Visible = true
+    Shadow.Visible = true
+    TweenService:Create(Window, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {BackgroundTransparency = 0}):Play()
+    -- Hide icon
+    TweenService:Create(IconBtn,    TweenInfo.new(0.15), {BackgroundTransparency = 1}):Play()
+    TweenService:Create(IconShadow, TweenInfo.new(0.15), {BackgroundTransparency = 1}):Play()
+    task.delay(0.15, function()
+        IconBtn.Visible    = false
+        IconShadow.Visible = false
+    end)
+end
+
+-- Tap icon to restore window
+IconBtn.MouseButton1Click:Connect(exitIconMode)
+
+-- Drag icon itself so user can reposition it while collapsed
+local iconDragging, iconDragStart, iconDragPos = false, nil, nil
+IconBtn.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        iconDragging  = true
+        iconDragStart = inp.Position
+        iconDragPos   = IconBtn.Position
+    end
+end)
+UIS.InputChanged:Connect(function(inp)
+    if not iconDragging then return end
+    if inp.UserInputType == Enum.UserInputType.MouseMovement
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        local d = inp.Position - iconDragStart
+        local vp = workspace.CurrentCamera.ViewportSize
+        local newX = math.clamp(iconDragPos.X.Offset + d.X, 0, vp.X - ICON_SIZE)
+        local newY = math.clamp(iconDragPos.Y.Offset + d.Y, 0, vp.Y - ICON_SIZE)
+        IconBtn.Position    = UDim2.new(0, newX, 0, newY)
+        IconShadow.Position = UDim2.new(0, newX + ICON_SIZE/2, 0, newY + ICON_SIZE/2)
+    end
+end)
+UIS.InputEnded:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        iconDragging = false
+    end
+end)
+
+-- ══════════════════════════════════════════════
+--  DRAG  (window) + edge-snap check on release
+-- ══════════════════════════════════════════════
+local dragging, dragStart, dragPos = false, nil, nil
+TitleBar.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        dragging  = true
+        dragStart = inp.Position
+        dragPos   = Window.Position
+    end
+end)
+UIS.InputChanged:Connect(function(inp)
+    if not dragging then return end
+    if inp.UserInputType == Enum.UserInputType.MouseMovement
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        local d = inp.Position - dragStart
+        Window.Position = UDim2.new(
+            dragPos.X.Scale, dragPos.X.Offset + d.X,
+            dragPos.Y.Scale, dragPos.Y.Offset + d.Y)
+    end
+end)
+UIS.InputEnded:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        if dragging then
+            dragging = false
+            -- Check if window centre is within EDGE_THRESH of any screen edge
+            local vp  = workspace.CurrentCamera.ViewportSize
+            local ap  = Window.AbsolutePosition
+            local as  = Window.AbsoluteSize
+            local cx  = ap.X + as.X / 2
+            local cy  = ap.Y + as.Y / 2
+            local nearEdge = cx < EDGE_THRESH
+                or cx > vp.X - EDGE_THRESH
+                or cy < EDGE_THRESH
+                or cy > vp.Y - EDGE_THRESH
+            if nearEdge then
+                enterIconMode()
+            end
+        end
+    end
+end)
+
+-- ══════════════════════════════════════════════
+--  BODY
+-- ══════════════════════════════════════════════
+local Body = Instance.new("Frame", Window)
+Body.Name             = "Body"
+Body.Size             = UDim2.new(1, 0, 1, -32)
+Body.Position         = UDim2.new(0, 0, 0, 32)
+Body.BackgroundTransparency = 1
+Body.BorderSizePixel  = 0
+Body.ClipsDescendants = true
+
+-- ══════════════════════════════════════════════
+--  LEFT SIDEBAR
+-- ══════════════════════════════════════════════
+local Sidebar = Instance.new("Frame", Body)
+Sidebar.Name             = "Sidebar"
+Sidebar.Size             = UDim2.new(0, 58, 1, 0)
+Sidebar.BackgroundColor3 = THEME.BG_SIDEBAR
+Sidebar.BorderSizePixel  = 0
+Sidebar.ZIndex           = 2
+
+local SBorder = Instance.new("Frame", Sidebar)
+SBorder.Size             = UDim2.new(0, 1, 1, 0)
+SBorder.Position         = UDim2.new(1, -1, 0, 0)
+SBorder.BackgroundColor3 = THEME.BORDER
+SBorder.BorderSizePixel  = 0
+
+-- ══════════════════════════════════════════════
+--  PANEL AREA
+-- ══════════════════════════════════════════════
+local PanelArea = Instance.new("Frame", Body)
+PanelArea.Name             = "PanelArea"
+PanelArea.Size             = UDim2.new(1, -58, 1, 0)
+PanelArea.Position         = UDim2.new(0, 58, 0, 0)
+PanelArea.BackgroundTransparency = 1
+PanelArea.BorderSizePixel  = 0
+PanelArea.ClipsDescendants = true
+
+local function makePanel()
+    local p = Instance.new("Frame", PanelArea)
+    p.Size              = UDim2.new(1, 0, 1, 0)
+    p.BackgroundTransparency = 1
+    p.BorderSizePixel   = 0
+    p.Visible           = false
+    p.ClipsDescendants  = true
+    return p
+end
+
+-- ══════════════════════════════════════════════
+--  PANEL 1 – HOME (script editor)
+-- ══════════════════════════════════════════════
+local HomePanel = makePanel()
+HomePanel.Visible = true
+
+-- Scripts sub-panel
+local ScriptsPane = Instance.new("Frame", HomePanel)
+ScriptsPane.Size             = UDim2.new(0, 155, 1, 0)
+ScriptsPane.BackgroundColor3 = THEME.BG_PANEL
+ScriptsPane.BorderSizePixel  = 0
+
+local SPBorder = Instance.new("Frame", ScriptsPane)
+SPBorder.Size             = UDim2.new(0, 1, 1, 0)
+SPBorder.Position         = UDim2.new(1, -1, 0, 0)
+SPBorder.BackgroundColor3 = THEME.BORDER
+SPBorder.BorderSizePixel  = 0
+
+-- Filter input
+local FilterFrame = Instance.new("Frame", ScriptsPane)
+FilterFrame.Size             = UDim2.new(1, -10, 0, 26)
+FilterFrame.Position         = UDim2.new(0, 5, 0, 8)
+FilterFrame.BackgroundColor3 = THEME.BG_FILTER
+FilterFrame.BorderSizePixel  = 0
+corner(FilterFrame, 4)
+stroke(FilterFrame, THEME.BORDER)
+
+local FilterIcon = Instance.new("TextLabel", FilterFrame)
+FilterIcon.Text             = "⌕"
+FilterIcon.TextSize         = 13
+FilterIcon.Font             = Enum.Font.GothamBold
+FilterIcon.TextColor3       = THEME.TEXT_DIM
+FilterIcon.BackgroundTransparency = 1
+FilterIcon.Size             = UDim2.new(0, 20, 1, 0)
+FilterIcon.Position         = UDim2.new(0, 3, 0, 0)
+FilterIcon.TextXAlignment   = Enum.TextXAlignment.Center
+
+local FilterInput = Instance.new("TextBox", FilterFrame)
+FilterInput.PlaceholderText   = "Filter items..."
+FilterInput.PlaceholderColor3 = THEME.TEXT_DIM
+FilterInput.Text              = ""
+FilterInput.TextSize          = 11
+FilterInput.Font              = Enum.Font.Gotham
+FilterInput.TextColor3        = THEME.TEXT_PRIMARY
+FilterInput.BackgroundTransparency = 1
+FilterInput.ClearTextOnFocus  = false
+FilterInput.Size              = UDim2.new(1, -26, 1, 0)
+FilterInput.Position          = UDim2.new(0, 22, 0, 0)
+FilterInput.TextXAlignment    = Enum.TextXAlignment.Left
+
+-- File type buttons
+local FilterBtnRow = Instance.new("Frame", ScriptsPane)
+FilterBtnRow.Size             = UDim2.new(1, -10, 0, 22)
+FilterBtnRow.Position         = UDim2.new(0, 5, 0, 40)
+FilterBtnRow.BackgroundTransparency = 1
+listLayout(FilterBtnRow, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center, 4)
+
+local activeFilter   = "ALL"
+local filterBtnRefs  = {}
+
+for _, ft in ipairs({"TXT", "LUA", "ALL FILES"}) do
+    local key = ft == "ALL FILES" and "ALL" or ft
+    local fb  = Instance.new("TextButton", FilterBtnRow)
+    fb.Text             = ft
+    fb.TextSize         = 9
+    fb.Font             = Enum.Font.GothamBold
+    fb.TextColor3       = THEME.TEXT_WHITE
+    fb.BackgroundColor3 = key == "ALL" and THEME.BG_BTNBLUE or THEME.BG_BTN
+    fb.AutoButtonColor  = false
+    fb.BorderSizePixel  = 0
+    fb.Size             = UDim2.new(0, ft == "ALL FILES" and 54 or 30, 1, 0)
+    corner(fb, 3)
+    filterBtnRefs[key] = fb
+end
+
+-- Scripts scrolling list
+local ScriptsList = Instance.new("ScrollingFrame", ScriptsPane)
+ScriptsList.Size             = UDim2.new(1, 0, 1, -70)
+ScriptsList.Position         = UDim2.new(0, 0, 0, 70)
+ScriptsList.BackgroundTransparency = 1
+ScriptsList.BorderSizePixel  = 0
+ScriptsList.ScrollBarThickness = 3
+ScriptsList.ScrollBarImageColor3 = THEME.ACCENT_DIM
+ScriptsList.CanvasSize       = UDim2.new(0, 0, 0, 0)
+ScriptsList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+listLayout(ScriptsList, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Top, 2)
+pad(ScriptsList, 4, 4, 4, 4)
+
+-- Forward-declare ScriptBox (assigned after EditorArea build)
+local ScriptBox
+
+-- Scan scripts folder
+local function getScriptsFolder()
+    local d = workspace:FindFirstChild("delta")
+    if d then
+        local s = d:FindFirstChild("Scripts")
+        if s then return s end
+    end
+    d = LocalPlayer:FindFirstChild("delta")
+    if d then
+        local s = d:FindFirstChild("Scripts")
+        if s then return s end
+    end
+    return nil
+end
+
+local function refreshScriptsList(filterText)
+    for _, c in ipairs(ScriptsList:GetChildren()) do
+        if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then
+            c:Destroy()
+        end
+    end
+    filterText = (filterText or ""):lower()
+
+    local folder = getScriptsFolder()
+    if not folder then
+        local hint = Instance.new("TextLabel", ScriptsList)
+        hint.Text            = "Create a folder:\nworkspace > delta > Scripts\nand place scripts inside."
+        hint.TextSize        = 10
+        hint.Font            = Enum.Font.Gotham
+        hint.TextColor3      = THEME.TEXT_DIM
+        hint.BackgroundTransparency = 1
+        hint.Size            = UDim2.new(1, -8, 0, 60)
+        hint.TextWrapped     = true
+        hint.TextXAlignment  = Enum.TextXAlignment.Center
+        return
+    end
+
+    local count = 0
+    for _, obj in ipairs(folder:GetChildren()) do
+        local isScript = obj:IsA("Script") or obj:IsA("LocalScript")
+            or obj:IsA("ModuleScript") or obj:IsA("StringValue")
+        if isScript then
+            local name = obj.Name
+            local ext  = name:match("%.(%a+)$") or "lua"
+            local skipExt = (activeFilter == "TXT" and ext ~= "txt")
+                or (activeFilter == "LUA" and ext ~= "lua" and ext ~= "luau")
+            local skipText = filterText ~= "" and not name:lower():find(filterText, 1, true)
+            if not skipExt and not skipText then
+                local btn = Instance.new("TextButton", ScriptsList)
+                btn.Text             = name
+                btn.TextSize         = 10
+                btn.Font             = Enum.Font.Gotham
+                btn.TextColor3       = THEME.TEXT_PRIMARY
+                btn.BackgroundColor3 = THEME.BG_BTN
+                btn.AutoButtonColor  = false
+                btn.BorderSizePixel  = 0
+                btn.Size             = UDim2.new(1, -4, 0, 26)
+                btn.TextTruncate     = Enum.TextTruncate.AtEnd
+                btn.TextXAlignment   = Enum.TextXAlignment.Left
+                corner(btn, 4)
+                pad(btn, 0, 0, 6, 0)
+                hover(btn, THEME.BG_BTN, Color3.fromRGB(38, 50, 74))
+
+                local capturedObj = obj
+                btn.MouseButton1Click:Connect(function()
+                    local src = ""
+                    if capturedObj:IsA("StringValue") then
+                        src = capturedObj.Value
+                    else
+                        local ok, s = pcall(function() return capturedObj.Source end)
+                        src = ok and s or ("-- Could not read: " .. capturedObj.Name)
+                    end
+                    if ScriptBox then
+                        ScriptBox.Text = src
+                    end
+                end)
+                count = count + 1
+            end
+        end
+    end
+
+    if count == 0 then
+        local hint = Instance.new("TextLabel", ScriptsList)
+        hint.Text            = "No scripts found."
+        hint.TextSize        = 10
+        hint.Font            = Enum.Font.Gotham
+        hint.TextColor3      = THEME.TEXT_DIM
+        hint.BackgroundTransparency = 1
+        hint.Size            = UDim2.new(1, -8, 0, 30)
+        hint.TextXAlignment  = Enum.TextXAlignment.Center
+    end
+end
+
+-- Wire filter buttons
+for key, fb in pairs(filterBtnRefs) do
+    local capturedKey = key
+    fb.MouseButton1Click:Connect(function()
+        activeFilter = capturedKey
+        for k, b in pairs(filterBtnRefs) do
+            b.BackgroundColor3 = k == capturedKey and THEME.BG_BTNBLUE or THEME.BG_BTN
+        end
+        refreshScriptsList(FilterInput.Text)
+    end)
+end
+FilterInput:GetPropertyChangedSignal("Text"):Connect(function()
+    refreshScriptsList(FilterInput.Text)
+end)
+
+-- ── EDITOR AREA ──────────────────────────────
+local EditorArea = Instance.new("Frame", HomePanel)
+EditorArea.Name             = "EditorArea"
+EditorArea.Size             = UDim2.new(1, -155, 1, 0)
+EditorArea.Position         = UDim2.new(0, 155, 0, 0)
+EditorArea.BackgroundColor3 = THEME.BG_EDITOR
+EditorArea.BorderSizePixel  = 0
+
+-- Tab bar
+local TabBar = Instance.new("Frame", EditorArea)
+TabBar.Size             = UDim2.new(1, 0, 0, 32)
+TabBar.BackgroundColor3 = THEME.BG_TABBAR
+TabBar.BorderSizePixel  = 0
+
+local TBBorder = Instance.new("Frame", TabBar)
+TBBorder.Size             = UDim2.new(1, 0, 0, 1)
+TBBorder.Position         = UDim2.new(0, 0, 1, -1)
+TBBorder.BackgroundColor3 = THEME.BORDER
+TBBorder.BorderSizePixel  = 0
+
+local ActiveTab = Instance.new("Frame", TabBar)
+ActiveTab.Size             = UDim2.new(0, 110, 1, -1)
+ActiveTab.BackgroundColor3 = THEME.BG_ACTIVETAB
+ActiveTab.BorderSizePixel  = 0
+
+local TabAccent = Instance.new("Frame", ActiveTab)
+TabAccent.Size             = UDim2.new(1, 0, 0, 2)
+TabAccent.Position         = UDim2.new(0, 0, 1, -2)
+TabAccent.BackgroundColor3 = THEME.ACCENT
+TabAccent.BorderSizePixel  = 0
+
+local TabDot = Instance.new("Frame", ActiveTab)
+TabDot.Size             = UDim2.new(0, 6, 0, 6)
+TabDot.Position         = UDim2.new(0, 7, 0.5, -3)
+TabDot.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
+TabDot.BorderSizePixel  = 0
+corner(TabDot, 3)
+
+local TabName = Instance.new("TextLabel", ActiveTab)
+TabName.Text             = "NewScript.lua"
+TabName.TextSize         = 11
+TabName.Font             = Enum.Font.Gotham
+TabName.TextColor3       = THEME.TEXT_TABNAME
+TabName.BackgroundTransparency = 1
+TabName.Size             = UDim2.new(1, -34, 1, 0)
+TabName.Position         = UDim2.new(0, 18, 0, 0)
+TabName.TextXAlignment   = Enum.TextXAlignment.Left
+
+local TabClose = Instance.new("TextButton", ActiveTab)
+TabClose.Text             = "×"
+TabClose.TextSize         = 14
+TabClose.Font             = Enum.Font.GothamBold
+TabClose.TextColor3       = THEME.TEXT_DIM
+TabClose.BackgroundTransparency = 1
+TabClose.Size             = UDim2.new(0, 18, 1, 0)
+TabClose.Position         = UDim2.new(1, -18, 0, 0)
+TabClose.AutoButtonColor  = false
+TabClose.BorderSizePixel  = 0
+
+local TabSep = Instance.new("Frame", TabBar)
+TabSep.Size             = UDim2.new(0, 1, 0.5, 0)
+TabSep.Position         = UDim2.new(0, 110, 0.25, 0)
+TabSep.BackgroundColor3 = THEME.BORDER
+TabSep.BorderSizePixel  = 0
+
+local NewTabBtn = Instance.new("TextButton", TabBar)
+NewTabBtn.Text             = "+"
+NewTabBtn.TextSize         = 16
+NewTabBtn.Font             = Enum.Font.GothamBold
+NewTabBtn.TextColor3       = THEME.TEXT_DIM
+NewTabBtn.BackgroundTransparency = 1
+NewTabBtn.Size             = UDim2.new(0, 28, 1, 0)
+NewTabBtn.Position         = UDim2.new(0, 113, 0, 0)
+NewTabBtn.AutoButtonColor  = false
+NewTabBtn.BorderSizePixel  = 0
+
+-- Code frame
+local CodeFrame = Instance.new("Frame", EditorArea)
+CodeFrame.Name             = "CodeFrame"
+CodeFrame.Size             = UDim2.new(1, 0, 1, -80)
+CodeFrame.Position         = UDim2.new(0, 0, 0, 32)
+CodeFrame.BackgroundColor3 = THEME.BG_EDITOR
+CodeFrame.BorderSizePixel  = 0
+CodeFrame.ClipsDescendants = true
+
+-- Line number gutter
+local Gutter = Instance.new("Frame", CodeFrame)
+Gutter.Size             = UDim2.new(0, 34, 1, 0)
+Gutter.BackgroundColor3 = THEME.BG_LINENOS
+Gutter.BorderSizePixel  = 0
+
+local GutterBorder = Instance.new("Frame", Gutter)
+GutterBorder.Size             = UDim2.new(0, 1, 1, 0)
+GutterBorder.Position         = UDim2.new(1, -1, 0, 0)
+GutterBorder.BackgroundColor3 = THEME.BORDER
+GutterBorder.BorderSizePixel  = 0
+
+local LineNumScroll = Instance.new("ScrollingFrame", Gutter)
+LineNumScroll.Size              = UDim2.new(1, -1, 1, 0)
+LineNumScroll.BackgroundTransparency = 1
+LineNumScroll.BorderSizePixel   = 0
+LineNumScroll.ScrollBarThickness = 0
+LineNumScroll.CanvasSize        = UDim2.new(0, 0, 0, 0)
+LineNumScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+LineNumScroll.ScrollingEnabled  = false
+listLayout(LineNumScroll)
+pad(LineNumScroll, 6, 6, 0, 3)
+
+-- Code scroll area
+local CodeScroll = Instance.new("ScrollingFrame", CodeFrame)
+CodeScroll.Size              = UDim2.new(1, -35, 1, 0)
+CodeScroll.Position          = UDim2.new(0, 35, 0, 0)
+CodeScroll.BackgroundTransparency = 1
+CodeScroll.BorderSizePixel   = 0
+CodeScroll.ScrollBarThickness = 4
+CodeScroll.ScrollBarImageColor3 = THEME.ACCENT_DIM
+CodeScroll.CanvasSize        = UDim2.new(0, 0, 0, 0)
+CodeScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+CodeScroll.ElasticBehavior   = Enum.ElasticBehavior.Never
+pad(CodeScroll, 6, 6, 6, 6)
+
+-- Sync line numbers with code scroll
+CodeScroll:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+    LineNumScroll.CanvasPosition = Vector2.new(0, CodeScroll.CanvasPosition.Y)
+end)
+
+-- THE SCRIPT BOX – starts empty, user types their own code
+ScriptBox = Instance.new("TextBox", CodeScroll)
+ScriptBox.Name              = "ScriptBox"
+ScriptBox.MultiLine         = true
+ScriptBox.ClearTextOnFocus  = false
+ScriptBox.Text              = ""   -- ← empty on purpose
+ScriptBox.TextSize          = 12
+ScriptBox.Font              = Enum.Font.Code
+ScriptBox.TextColor3        = THEME.CODE
+ScriptBox.BackgroundTransparency = 1
+ScriptBox.BorderSizePixel   = 0
+ScriptBox.Size              = UDim2.new(1, 0, 0, 0)
+ScriptBox.AutomaticSize     = Enum.AutomaticSize.Y
+ScriptBox.TextXAlignment    = Enum.TextXAlignment.Left
+ScriptBox.TextYAlignment    = Enum.TextYAlignment.Top
+ScriptBox.PlaceholderText   = "-- Write your script here..."
+ScriptBox.PlaceholderColor3 = THEME.TEXT_DIM
+ScriptBox.RichText          = false
+
+-- Efficient line number generation
+local lineCount = 0
+local function rebuildLines(n)
+    if n == lineCount then return end
+    if n > lineCount then
+        for i = lineCount + 1, n do
+            local ln = Instance.new("TextLabel", LineNumScroll)
+            ln.Name            = "LN" .. i
+            ln.Text            = tostring(i)
+            ln.TextSize        = 11
+            ln.Font            = Enum.Font.Code
+            ln.TextColor3      = THEME.TEXT_LINENO
+            ln.BackgroundTransparency = 1
+            ln.Size            = UDim2.new(1, 0, 0, 17)
+            ln.TextXAlignment  = Enum.TextXAlignment.Right
+            ln.TextYAlignment  = Enum.TextYAlignment.Center
+            ln.BorderSizePixel = 0
+        end
+    else
+        for i = n + 1, lineCount do
+            local ln = LineNumScroll:FindFirstChild("LN" .. i)
+            if ln then ln:Destroy() end
+        end
+    end
+    lineCount = n
+end
+
+rebuildLines(1)
+ScriptBox:GetPropertyChangedSignal("Text"):Connect(function()
+    local n = math.max(1, select(2, ScriptBox.Text:gsub("\n", "\n")) + 1)
+    rebuildLines(n)
+end)
+
+-- ── BOTTOM ACTION BAR ────────────────────────
+local BottomBar = Instance.new("Frame", EditorArea)
+BottomBar.Size             = UDim2.new(1, 0, 0, 48)
+BottomBar.Position         = UDim2.new(0, 0, 1, -48)
+BottomBar.BackgroundColor3 = THEME.BG_BOTTOMBAR
+BottomBar.BorderSizePixel  = 0
+
+local BBBorder = Instance.new("Frame", BottomBar)
+BBBorder.Size             = UDim2.new(1, 0, 0, 1)
+BBBorder.BackgroundColor3 = THEME.BORDER
+BBBorder.BorderSizePixel  = 0
+
+listLayout(BottomBar, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Center, 6)
+pad(BottomBar, 8, 8, 6, 6)
+
+local ActionBtns = {}
+for _, name in ipairs({"EXECUTE","CLEAR","OPEN","SAVE","INJECT"}) do
+    local b = Instance.new("TextButton", BottomBar)
+    b.Text             = name
+    b.TextSize         = 11
+    b.Font             = Enum.Font.GothamBold
+    b.TextColor3       = THEME.TEXT_WHITE
+    b.BackgroundColor3 = THEME.BG_BTN
+    b.AutoButtonColor  = false
+    b.BorderSizePixel  = 0
+    b.Size             = UDim2.new(0, 72, 1, 0)
+    corner(b, 4)
+    stroke(b, THEME.BORDER)
+    hover(b, THEME.BG_BTN, Color3.fromRGB(42, 55, 82))
+    clickFlash(b, THEME.BG_BTN)
+    ActionBtns[name] = b
+end
+
+-- Button logic
+ActionBtns["EXECUTE"].MouseButton1Click:Connect(function()
+    local code = ScriptBox.Text
+    if code == "" then return end
+    local fn, err = loadstring(code)
+    if fn then
+        local ok, runErr = pcall(fn)
+        if not ok then warn("[Delta] Runtime error:", runErr) end
+    else
+        warn("[Delta] Syntax error:", err)
+    end
+end)
+
+ActionBtns["CLEAR"].MouseButton1Click:Connect(function()
+    ScriptBox.Text = ""
+end)
+
+ActionBtns["OPEN"].MouseButton1Click:Connect(function()
+    local ok, clip = pcall(getclipboard)
+    if ok and type(clip) == "string" and clip ~= "" then
+        ScriptBox.Text = clip
+    else
+        ScriptBox:CaptureFocus()
+    end
+end)
+
+ActionBtns["SAVE"].MouseButton1Click:Connect(function()
+    pcall(setclipboard, ScriptBox.Text)
+end)
+
+ActionBtns["INJECT"].MouseButton1Click:Connect(function()
+    warn("[Delta] Inject: implement for your executor")
+end)
+
+TabClose.MouseButton1Click:Connect(function()
+    ScriptBox.Text = ""
+    TabName.Text   = "NewScript.lua"
+end)
+
+NewTabBtn.MouseButton1Click:Connect(function()
+    ScriptBox.Text = ""
+    TabName.Text   = "NewScript.lua"
+end)
+
+refreshScriptsList("")
+
+-- ══════════════════════════════════════════════
+--  PANEL 2 – SCRIPTS HUB
+-- ══════════════════════════════════════════════
+local ScriptsPanel = makePanel()
+
+local STitle = Instance.new("TextLabel", ScriptsPanel)
+STitle.Text            = "Script Hub"
+STitle.TextSize        = 16
+STitle.Font            = Enum.Font.GothamBold
+STitle.TextColor3      = THEME.TEXT_PRIMARY
+STitle.BackgroundTransparency = 1
+STitle.Size            = UDim2.new(1, -24, 0, 38)
+STitle.Position        = UDim2.new(0, 16, 0, 6)
+STitle.TextXAlignment  = Enum.TextXAlignment.Left
+
+local SSub = Instance.new("TextLabel", ScriptsPanel)
+SSub.Text            = "Scripts from workspace.delta.Scripts"
+SSub.TextSize        = 10
+SSub.Font            = Enum.Font.Gotham
+SSub.TextColor3      = THEME.TEXT_DIM
+SSub.BackgroundTransparency = 1
+SSub.Size            = UDim2.new(1, -24, 0, 18)
+SSub.Position        = UDim2.new(0, 16, 0, 36)
+SSub.TextXAlignment  = Enum.TextXAlignment.Left
+
+local SSearchFrame = Instance.new("Frame", ScriptsPanel)
+SSearchFrame.Size             = UDim2.new(1, -24, 0, 28)
+SSearchFrame.Position         = UDim2.new(0, 12, 0, 58)
+SSearchFrame.BackgroundColor3 = THEME.BG_FILTER
+SSearchFrame.BorderSizePixel  = 0
+corner(SSearchFrame, 4)
+stroke(SSearchFrame, THEME.BORDER)
+
+local SSearchIcon = Instance.new("TextLabel", SSearchFrame)
+SSearchIcon.Text             = "⌕"
+SSearchIcon.TextSize         = 13
+SSearchIcon.Font             = Enum.Font.GothamBold
+SSearchIcon.TextColor3       = THEME.TEXT_DIM
+SSearchIcon.BackgroundTransparency = 1
+SSearchIcon.Size             = UDim2.new(0, 24, 1, 0)
+SSearchIcon.TextXAlignment   = Enum.TextXAlignment.Center
+
+local SSearchInput = Instance.new("TextBox", SSearchFrame)
+SSearchInput.PlaceholderText   = "Search scripts..."
+SSearchInput.PlaceholderColor3 = THEME.TEXT_DIM
+SSearchInput.Text              = ""
+SSearchInput.TextSize          = 12
+SSearchInput.Font              = Enum.Font.Gotham
+SSearchInput.TextColor3        = THEME.TEXT_PRIMARY
+SSearchInput.BackgroundTransparency = 1
+SSearchInput.ClearTextOnFocus  = false
+SSearchInput.Size              = UDim2.new(1, -28, 1, 0)
+SSearchInput.Position          = UDim2.new(0, 24, 0, 0)
+SSearchInput.TextXAlignment    = Enum.TextXAlignment.Left
+
+local HubScroll = Instance.new("ScrollingFrame", ScriptsPanel)
+HubScroll.Size             = UDim2.new(1, -24, 1, -96)
+HubScroll.Position         = UDim2.new(0, 12, 0, 94)
+HubScroll.BackgroundTransparency = 1
+HubScroll.BorderSizePixel  = 0
+HubScroll.ScrollBarThickness = 4
+HubScroll.ScrollBarImageColor3 = THEME.ACCENT_DIM
+HubScroll.CanvasSize       = UDim2.new(0, 0, 0, 0)
+HubScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+listLayout(HubScroll, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Top, 6)
+pad(HubScroll, 4, 8, 0, 0)
+
+local function refreshHubList(query)
+    for _, c in ipairs(HubScroll:GetChildren()) do
+        if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then c:Destroy() end
+    end
+    query = (query or ""):lower()
+
+    local folder = getScriptsFolder()
+    if not folder then
+        local lbl = Instance.new("TextLabel", HubScroll)
+        lbl.Text            = "No Scripts folder found.\nCreate: workspace > delta > Scripts"
+        lbl.TextSize        = 12
+        lbl.Font            = Enum.Font.Gotham
+        lbl.TextColor3      = THEME.TEXT_DIM
+        lbl.BackgroundTransparency = 1
+        lbl.Size            = UDim2.new(1, 0, 0, 60)
+        lbl.TextWrapped     = true
+        lbl.TextXAlignment  = Enum.TextXAlignment.Center
+        return
+    end
+
+    local found = false
+    for _, obj in ipairs(folder:GetChildren()) do
+        local isScript2 = obj:IsA("Script") or obj:IsA("LocalScript")
+            or obj:IsA("ModuleScript") or obj:IsA("StringValue")
+        local skipQuery = query ~= "" and not obj.Name:lower():find(query, 1, true)
+        if isScript2 and not skipQuery then
+        found = true
+
+        local card = Instance.new("Frame", HubScroll)
+        card.Size             = UDim2.new(1, 0, 0, 52)
+        card.BackgroundColor3 = THEME.BG_BTN
+        card.BorderSizePixel  = 0
+        corner(card, 6)
+        stroke(card, THEME.BORDER)
+
+        local cardName = Instance.new("TextLabel", card)
+        cardName.Text            = obj.Name
+        cardName.TextSize        = 12
+        cardName.Font            = Enum.Font.GothamBold
+        cardName.TextColor3      = THEME.TEXT_PRIMARY
+        cardName.BackgroundTransparency = 1
+        cardName.Size            = UDim2.new(1, -90, 0, 26)
+        cardName.Position        = UDim2.new(0, 10, 0, 6)
+        cardName.TextXAlignment  = Enum.TextXAlignment.Left
+
+        local cardType = Instance.new("TextLabel", card)
+        cardType.Text            = obj.ClassName
+        cardType.TextSize        = 10
+        cardType.Font            = Enum.Font.Gotham
+        cardType.TextColor3      = THEME.TEXT_DIM
+        cardType.BackgroundTransparency = 1
+        cardType.Size            = UDim2.new(1, -90, 0, 20)
+        cardType.Position        = UDim2.new(0, 10, 0, 28)
+        cardType.TextXAlignment  = Enum.TextXAlignment.Left
+
+        local execBtn = Instance.new("TextButton", card)
+        execBtn.Text             = "Execute"
+        execBtn.TextSize         = 10
+        execBtn.Font             = Enum.Font.GothamBold
+        execBtn.TextColor3       = THEME.TEXT_WHITE
+        execBtn.BackgroundColor3 = THEME.ACCENT
+        execBtn.AutoButtonColor  = false
+        execBtn.BorderSizePixel  = 0
+        execBtn.Size             = UDim2.new(0, 66, 0, 24)
+        execBtn.Position         = UDim2.new(1, -76, 0.5, -12)
+        corner(execBtn, 4)
+        hover(execBtn, THEME.ACCENT, Color3.fromRGB(100, 165, 255))
+
+        local capturedObj = obj
+        execBtn.MouseButton1Click:Connect(function()
+            local src = ""
+            if capturedObj:IsA("StringValue") then
+                src = capturedObj.Value
+            else
+                local ok, s = pcall(function() return capturedObj.Source end)
+                src = ok and s or ""
+            end
+            if src ~= "" then
+                local fn, er = loadstring(src)
+                if fn then pcall(fn) else warn("[Delta Hub]", er) end
+            end
+        end)
+        end -- if isScript2
+    end -- for loop
+
+    if not found then
+        local lbl = Instance.new("TextLabel", HubScroll)
+        lbl.Text            = "No scripts found."
+        lbl.TextSize        = 12
+        lbl.Font            = Enum.Font.Gotham
+        lbl.TextColor3      = THEME.TEXT_DIM
+        lbl.BackgroundTransparency = 1
+        lbl.Size            = UDim2.new(1, 0, 0, 30)
+        lbl.TextXAlignment  = Enum.TextXAlignment.Center
+    end
+end
+
+refreshHubList("")
+SSearchInput:GetPropertyChangedSignal("Text"):Connect(function()
+    refreshHubList(SSearchInput.Text)
+end)
+
+-- ══════════════════════════════════════════════
+--  PANEL 3 – THEMES (redirect)
+-- ══════════════════════════════════════════════
+local ThemesPanel = makePanel()
+
+local ThTitle = Instance.new("TextLabel", ThemesPanel)
+ThTitle.Text             = "Themes"
+ThTitle.TextSize         = 16
+ThTitle.Font             = Enum.Font.GothamBold
+ThTitle.TextColor3       = THEME.TEXT_PRIMARY
+ThTitle.BackgroundTransparency = 1
+ThTitle.Size             = UDim2.new(1, -24, 0, 40)
+ThTitle.Position         = UDim2.new(0, 16, 0, 8)
+ThTitle.TextXAlignment   = Enum.TextXAlignment.Left
+
+local ThSub = Instance.new("TextLabel", ThemesPanel)
+ThSub.Text             = "Use the Config tab (⚙) to customize colors."
+ThSub.TextSize         = 12
+ThSub.Font             = Enum.Font.Gotham
+ThSub.TextColor3       = THEME.TEXT_DIM
+ThSub.BackgroundTransparency = 1
+ThSub.Size             = UDim2.new(1, -32, 0, 24)
+ThSub.Position         = UDim2.new(0, 16, 0, 46)
+ThSub.TextXAlignment   = Enum.TextXAlignment.Left
+
+-- ══════════════════════════════════════════════
+--  PANEL 4 – CONFIG (color customizer)
+-- ══════════════════════════════════════════════
+local ConfigPanel = makePanel()
+
+local CTitle = Instance.new("TextLabel", ConfigPanel)
+CTitle.Text             = "Color Customizer"
+CTitle.TextSize         = 15
+CTitle.Font             = Enum.Font.GothamBold
+CTitle.TextColor3       = THEME.TEXT_PRIMARY
+CTitle.BackgroundTransparency = 1
+CTitle.Size             = UDim2.new(1, -24, 0, 36)
+CTitle.Position         = UDim2.new(0, 12, 0, 6)
+CTitle.TextXAlignment   = Enum.TextXAlignment.Left
+
+local CScroll = Instance.new("ScrollingFrame", ConfigPanel)
+CScroll.Size             = UDim2.new(1, -24, 1, -50)
+CScroll.Position         = UDim2.new(0, 12, 0, 46)
+CScroll.BackgroundTransparency = 1
+CScroll.BorderSizePixel  = 0
+CScroll.ScrollBarThickness = 4
+CScroll.ScrollBarImageColor3 = THEME.ACCENT_DIM
+CScroll.CanvasSize       = UDim2.new(0, 0, 0, 0)
+CScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+listLayout(CScroll, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Top, 8)
+pad(CScroll, 4, 12, 0, 6)
+
+-- Live color application table: themeKey -> list of {obj, property}
+local colorTargets = {}
+local function reg(key, obj, prop)
+    colorTargets[key] = colorTargets[key] or {}
+    table.insert(colorTargets[key], {obj = obj, prop = prop})
+end
+
+reg("BG_OUTER",    Window,     "BackgroundColor3")
+reg("BG_SIDEBAR",  Sidebar,    "BackgroundColor3")
+reg("BG_PANEL",    ScriptsPane,"BackgroundColor3")
+reg("BG_EDITOR",   EditorArea, "BackgroundColor3")
+reg("BG_EDITOR",   CodeFrame,  "BackgroundColor3")
+reg("BG_TABBAR",   TabBar,     "BackgroundColor3")
+reg("BG_ACTIVETAB",ActiveTab,  "BackgroundColor3")
+reg("BG_LINENOS",  Gutter,     "BackgroundColor3")
+reg("BG_BOTTOMBAR",BottomBar,  "BackgroundColor3")
+reg("BG_TITLEBAR", TitleBar,   "BackgroundColor3")
+reg("BG_TITLEBAR", TBSquare,   "BackgroundColor3")
+reg("ACCENT",      TabAccent,  "BackgroundColor3")
+reg("ACCENT",      TabDot,     "BackgroundColor3")
+
+local function applyThemeKey(key, color)
+    THEME[key] = color
+    local targets = colorTargets[key]
+    if targets then
+        for _, t in ipairs(targets) do
+            if t.obj and t.obj.Parent then
+                pcall(function() t.obj[t.prop] = color end)
+            end
+        end
+    end
+    if key == "CODE" and ScriptBox then
+        ScriptBox.TextColor3 = color
+    end
+    if key == "TEXT_PRIMARY" then
+        for _, l in ipairs({STitle, ThTitle, CTitle, TabName}) do
+            pcall(function() l.TextColor3 = color end)
+        end
+    end
+end
+
+-- Preset themes
+local PRESETS = {
+    {name = "Default",  colors = {ACCENT = Color3.fromRGB(80,140,255),  BG_OUTER = Color3.fromRGB(18,22,30)}},
+    {name = "Green",    colors = {ACCENT = Color3.fromRGB(50,220,120),  BG_OUTER = Color3.fromRGB(12,20,16)}},
+    {name = "Crimson",  colors = {ACCENT = Color3.fromRGB(220,60,60),   BG_OUTER = Color3.fromRGB(22,14,14)}},
+    {name = "Gold",     colors = {ACCENT = Color3.fromRGB(220,180,60),  BG_OUTER = Color3.fromRGB(20,18,10)}},
+    {name = "Purple",   colors = {ACCENT = Color3.fromRGB(160,80,255),  BG_OUTER = Color3.fromRGB(18,14,28)}},
+    {name = "Light",    colors = {
+        BG_OUTER = Color3.fromRGB(230,235,245), BG_SIDEBAR = Color3.fromRGB(210,218,235),
+        BG_EDITOR = Color3.fromRGB(240,244,255), BG_TABBAR = Color3.fromRGB(220,228,245),
+        BG_ACTIVETAB = Color3.fromRGB(200,215,240), BG_LINENOS = Color3.fromRGB(215,222,238),
+        BG_BOTTOMBAR = Color3.fromRGB(220,228,245), BG_TITLEBAR = Color3.fromRGB(200,210,230),
+        ACCENT = Color3.fromRGB(60,120,220), CODE = Color3.fromRGB(30,40,70),
+        TEXT_PRIMARY = Color3.fromRGB(30,40,70)
+    }},
+}
+
+-- Preset section label
+local PresetLbl = Instance.new("TextLabel", CScroll)
+PresetLbl.Text            = "Quick Presets"
+PresetLbl.TextSize        = 12
+PresetLbl.Font            = Enum.Font.GothamBold
+PresetLbl.TextColor3      = THEME.TEXT_DIM
+PresetLbl.BackgroundTransparency = 1
+PresetLbl.Size            = UDim2.new(1, 0, 0, 20)
+PresetLbl.TextXAlignment  = Enum.TextXAlignment.Left
+
+local PresetRow = Instance.new("Frame", CScroll)
+PresetRow.Size             = UDim2.new(1, 0, 0, 28)
+PresetRow.BackgroundTransparency = 1
+listLayout(PresetRow, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center, 5)
+
+for _, preset in ipairs(PRESETS) do
+    local pb = Instance.new("TextButton", PresetRow)
+    pb.Text             = preset.name
+    pb.TextSize         = 9
+    pb.Font             = Enum.Font.GothamBold
+    pb.TextColor3       = THEME.TEXT_WHITE
+    pb.BackgroundColor3 = Color3.fromRGB(35, 45, 68)
+    pb.AutoButtonColor  = false
+    pb.BorderSizePixel  = 0
+    pb.Size             = UDim2.new(0, 58, 1, 0)
+    corner(pb, 4)
+    hover(pb, Color3.fromRGB(35,45,68), Color3.fromRGB(50,65,95))
+    local capturedPreset = preset
+    pb.MouseButton1Click:Connect(function()
+        for k, col in pairs(capturedPreset.colors) do
+            applyThemeKey(k, col)
+        end
+    end)
+end
+
+-- Divider
+local Div = Instance.new("Frame", CScroll)
+Div.Size             = UDim2.new(1, 0, 0, 1)
+Div.BackgroundColor3 = THEME.BORDER
+Div.BorderSizePixel  = 0
+
+local IndLbl = Instance.new("TextLabel", CScroll)
+IndLbl.Text            = "Individual Colors"
+IndLbl.TextSize        = 12
+IndLbl.Font            = Enum.Font.GothamBold
+IndLbl.TextColor3      = THEME.TEXT_DIM
+IndLbl.BackgroundTransparency = 1
+IndLbl.Size            = UDim2.new(1, 0, 0, 20)
+IndLbl.TextXAlignment  = Enum.TextXAlignment.Left
+
+local colorEntries = {
+    {"Window BG",       "BG_OUTER"},
+    {"Sidebar BG",      "BG_SIDEBAR"},
+    {"Panel BG",        "BG_PANEL"},
+    {"Editor BG",       "BG_EDITOR"},
+    {"Tab Bar BG",      "BG_TABBAR"},
+    {"Active Tab",      "BG_ACTIVETAB"},
+    {"Line Nums BG",    "BG_LINENOS"},
+    {"Bottom Bar BG",   "BG_BOTTOMBAR"},
+    {"Title Bar BG",    "BG_TITLEBAR"},
+    {"Accent Color",    "ACCENT"},
+    {"Text Primary",    "TEXT_PRIMARY"},
+    {"Text Dim",        "TEXT_DIM"},
+    {"Code Text",       "CODE"},
+}
+
+local function makeColorRow(label, themeKey)
+    local row = Instance.new("Frame", CScroll)
+    row.Size             = UDim2.new(1, 0, 0, 38)
+    row.BackgroundColor3 = THEME.BG_BTN
+    row.BorderSizePixel  = 0
+    corner(row, 5)
+
+    -- Label
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Text             = label
+    lbl.TextSize         = 11
+    lbl.Font             = Enum.Font.Gotham
+    lbl.TextColor3       = THEME.TEXT_PRIMARY
+    lbl.BackgroundTransparency = 1
+    lbl.Size             = UDim2.new(0, 100, 1, 0)
+    lbl.Position         = UDim2.new(0, 8, 0, 0)
+    lbl.TextXAlignment   = Enum.TextXAlignment.Left
+
+    -- Color swatch
+    local swatch = Instance.new("Frame", row)
+    swatch.Size             = UDim2.new(0, 20, 0, 20)
+    swatch.Position         = UDim2.new(1, -26, 0.5, -10)
+    swatch.BackgroundColor3 = THEME[themeKey] or Color3.new(1,1,1)
+    swatch.BorderSizePixel  = 0
+    corner(swatch, 4)
+    stroke(swatch, THEME.BORDER)
+
+    -- RGB number inputs
+    local function numInput(val, xPos)
+        local bg = Instance.new("Frame", row)
+        bg.Size             = UDim2.new(0, 36, 0, 22)
+        bg.Position         = UDim2.new(0, xPos, 0.5, -11)
+        bg.BackgroundColor3 = THEME.BG_FILTER
+        bg.BorderSizePixel  = 0
+        corner(bg, 3)
+        stroke(bg, THEME.BORDER)
+
+        local tb = Instance.new("TextBox", bg)
+        tb.Text             = tostring(math.floor(val))
+        tb.TextSize         = 10
+        tb.Font             = Enum.Font.Code
+        tb.TextColor3       = THEME.TEXT_PRIMARY
+        tb.BackgroundTransparency = 1
+        tb.ClearTextOnFocus = false
+        tb.Size             = UDim2.new(1, -4, 1, 0)
+        tb.Position         = UDim2.new(0, 2, 0, 0)
+        tb.TextXAlignment   = Enum.TextXAlignment.Center
+        return tb
+    end
+
+    local cur = THEME[themeKey] or Color3.new(0.5,0.5,0.5)
+    local rTB = numInput(cur.R * 255, 110)
+    local gTB = numInput(cur.G * 255, 150)
+    local bTB = numInput(cur.B * 255, 190)
+
+    -- Channel labels
+    for i, ch in ipairs({"R","G","B"}) do
+        local cl = Instance.new("TextLabel", row)
+        cl.Text             = ch
+        cl.TextSize         = 9
+        cl.Font             = Enum.Font.GothamBold
+        cl.TextColor3       = THEME.TEXT_DIM
+        cl.BackgroundTransparency = 1
+        cl.Size             = UDim2.new(0, 10, 0, 20)
+        cl.Position         = UDim2.new(0, 100 + (i-1)*40, 0.5, -10)
+        cl.TextXAlignment   = Enum.TextXAlignment.Left
+    end
+
+    local function applyRGB()
+        local r = math.clamp(tonumber(rTB.Text) or 0, 0, 255)
+        local g = math.clamp(tonumber(gTB.Text) or 0, 0, 255)
+        local b = math.clamp(tonumber(bTB.Text) or 0, 0, 255)
+        local col = Color3.fromRGB(r, g, b)
+        swatch.BackgroundColor3 = col
+        applyThemeKey(themeKey, col)
+    end
+
+    rTB.FocusLost:Connect(applyRGB)
+    gTB.FocusLost:Connect(applyRGB)
+    bTB.FocusLost:Connect(applyRGB)
+end
+
+for _, entry in ipairs(colorEntries) do
+    makeColorRow(entry[1], entry[2])
+end
+
+-- ══════════════════════════════════════════════
+--  SIDEBAR NAV
+-- ══════════════════════════════════════════════
+local panels = {HomePanel, ScriptsPanel, ThemesPanel, ConfigPanel}
+local SidebarItems = {
+    {icon = "⌂",  label = "HOME"},
+    {icon = "≡",  label = "SCRIPTS"},
+    {icon = "◎",  label = "THEMES"},
+    {icon = "⚙",  label = "CONFIG"},
+}
+local navBtns = {}
+
+local SideLayout = Instance.new("Frame", Sidebar)
+SideLayout.Size             = UDim2.new(1, 0, 1, 0)
+SideLayout.BackgroundTransparency = 1
+SideLayout.ZIndex           = 3
+listLayout(SideLayout, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Top, 2)
+pad(SideLayout, 8, 8, 0, 0)
+
+local function setNav(idx)
+    for i, nb in ipairs(navBtns) do
+        local active = i == idx
+        nb.frame.BackgroundTransparency = active and 0 or 1
+        nb.accent.Visible               = active
+        nb.icon.TextColor3              = active and THEME.ACCENT or THEME.TEXT_SIDEBAR
+        nb.text.TextColor3              = active and THEME.ACCENT or THEME.TEXT_SIDEBAR
+        panels[i].Visible               = active
+    end
+    if idx == 1 then refreshScriptsList(FilterInput.Text) end
+    if idx == 2 then refreshHubList(SSearchInput.Text) end
+end
+
+for i, item in ipairs(SidebarItems) do
+    local itemFrame = Instance.new("Frame", SideLayout)
+    itemFrame.Size             = UDim2.new(1, -4, 0, 56)
+    itemFrame.BackgroundColor3 = Color3.fromRGB(35, 45, 65)
+    itemFrame.BackgroundTransparency = i == 1 and 0 or 1
+    itemFrame.BorderSizePixel  = 0
+    itemFrame.ZIndex           = 3
+    corner(itemFrame, 5)
+
+    local accentBar = Instance.new("Frame", itemFrame)
+    accentBar.Size             = UDim2.new(0, 2, 0.6, 0)
+    accentBar.Position         = UDim2.new(0, 0, 0.2, 0)
+    accentBar.BackgroundColor3 = THEME.ACCENT
+    accentBar.BorderSizePixel  = 0
+    accentBar.Visible          = i == 1
+    accentBar.ZIndex           = 4
+    corner(accentBar, 2)
+
+    local iconLbl = Instance.new("TextLabel", itemFrame)
+    iconLbl.Text             = item.icon
+    iconLbl.TextSize         = 18
+    iconLbl.Font             = Enum.Font.GothamBold
+    iconLbl.TextColor3       = i == 1 and THEME.ACCENT or THEME.TEXT_SIDEBAR
+    iconLbl.BackgroundTransparency = 1
+    iconLbl.Size             = UDim2.new(1, 0, 0, 28)
+    iconLbl.Position         = UDim2.new(0, 0, 0, 6)
+    iconLbl.TextXAlignment   = Enum.TextXAlignment.Center
+    iconLbl.ZIndex           = 4
+
+    local textLbl = Instance.new("TextLabel", itemFrame)
+    textLbl.Text             = item.label
+    textLbl.TextSize         = 8
+    textLbl.Font             = Enum.Font.GothamBold
+    textLbl.TextColor3       = i == 1 and THEME.ACCENT or THEME.TEXT_SIDEBAR
+    textLbl.BackgroundTransparency = 1
+    textLbl.Size             = UDim2.new(1, 0, 0, 14)
+    textLbl.Position         = UDim2.new(0, 0, 0, 34)
+    textLbl.TextXAlignment   = Enum.TextXAlignment.Center
+    textLbl.ZIndex           = 4
+
+    -- Invisible clickable layer on top
+    local clickBtn = Instance.new("TextButton", itemFrame)
+    clickBtn.Size             = UDim2.new(1, 0, 1, 0)
+    clickBtn.BackgroundTransparency = 1
+    clickBtn.Text             = ""
+    clickBtn.AutoButtonColor  = false
+    clickBtn.BorderSizePixel  = 0
+    clickBtn.ZIndex           = 5
+
+    local capturedIdx = i
+    clickBtn.MouseButton1Click:Connect(function()
+        setNav(capturedIdx)
+    end)
+
+    navBtns[i] = {
+        frame  = itemFrame,
+        accent = accentBar,
+        icon   = iconLbl,
+        text   = textLbl,
+    }
+end
+
+-- ══════════════════════════════════════════════
+--  DELTA EXECUTOR HIDE / SHOW
+--  Targets: CoreGui.[hash].Executor  (the real Delta UI)
+--  Also hides DarkOverlay, Home, Scripthub,
+--  Settings, Sidebar, Console frames.
+-- ══════════════════════════════════════════════
+
+-- Names of GUI frames inside the Delta container to hide.
+-- The hash/key names randomize every join so we do NOT hardcode them.
+-- We scan CoreGui for any container holding an "Executor" GuiObject.
+local DELTA_FRAMES = {
+    "Executor",
+    "DarkOverlay",
+    "Home",
+    "Scripthub",
+    "Settings",
+    "Sidebar",
+    "Console",
+}
+
+local deltaHidden  = false
+local savedVisible = {}  -- [frame] = original Visible value
+
+-- Search up to 3 levels deep for a container whose direct child
+-- named "Executor" is a GuiObject (not a Folder/Script).
+local function getDeltaRoot()
+    local CoreGui = game:GetService("CoreGui")
+
+    local function hasExecutorFrame(obj)
+        for _, c in ipairs(obj:GetChildren()) do
+            if c.Name == "Executor" and (c:IsA("GuiObject") or c:IsA("ScreenGui")) then
+                return true
+            end
+        end
+        return false
+    end
+
+    for _, child in ipairs(CoreGui:GetChildren()) do
+        if hasExecutorFrame(child) then return child end
+        for _, sub in ipairs(child:GetChildren()) do
+            if hasExecutorFrame(sub) then return sub end
+            for _, subsub in ipairs(sub:GetChildren()) do
+                if hasExecutorFrame(subsub) then return subsub end
+            end
+        end
+    end
+    return nil
+end
+
+local function setDeltaVisible(visible)
+    local root = getDeltaRoot()
+    if not root then
+        warn("[Delta Toggle] Delta root not found in CoreGui.")
+        return
+    end
+    for _, frameName in ipairs(DELTA_FRAMES) do
+        local frame = root:FindFirstChild(frameName)
+        -- Only touch GuiObjects/ScreenGuis - never Folders or Scripts
+        if frame and (frame:IsA("GuiObject") or frame:IsA("ScreenGui") or frame:IsA("LayerCollector")) then
+            if not visible then
+                savedVisible[frame] = frame.Visible
+                frame.Visible = false
+            else
+                frame.Visible = (savedVisible[frame] ~= nil) and savedVisible[frame] or true
+            end
+        end
+    end
+end
+
+-- ── Hide button at the bottom of the sidebar ──
+local HideBtn = Instance.new("TextButton", Sidebar)
+HideBtn.Name             = "HideBtn"
+HideBtn.Size             = UDim2.new(1, -8, 0, 44)
+HideBtn.Position         = UDim2.new(0, 4, 1, -52)
+HideBtn.BackgroundColor3 = Color3.fromRGB(30, 38, 55)
+HideBtn.AutoButtonColor  = false
+HideBtn.BorderSizePixel  = 0
+HideBtn.Text             = ""
+HideBtn.ZIndex           = 4
+corner(HideBtn, 6)
+stroke(HideBtn, THEME.BORDER)
+
+local HideIcon = Instance.new("TextLabel", HideBtn)
+HideIcon.Text             = "👁"
+HideIcon.TextSize         = 16
+HideIcon.Font             = Enum.Font.GothamBold
+HideIcon.TextColor3       = THEME.TEXT_SIDEBAR
+HideIcon.BackgroundTransparency = 1
+HideIcon.Size             = UDim2.new(1, 0, 0, 22)
+HideIcon.Position         = UDim2.new(0, 0, 0, 4)
+HideIcon.TextXAlignment   = Enum.TextXAlignment.Center
+HideIcon.ZIndex           = 5
+
+local HideLabel = Instance.new("TextLabel", HideBtn)
+HideLabel.Text            = "HIDE"
+HideLabel.TextSize        = 8
+HideLabel.Font            = Enum.Font.GothamBold
+HideLabel.TextColor3      = THEME.TEXT_SIDEBAR
+HideLabel.BackgroundTransparency = 1
+HideLabel.Size            = UDim2.new(1, 0, 0, 14)
+HideLabel.Position        = UDim2.new(0, 0, 0, 26)
+HideLabel.TextXAlignment  = Enum.TextXAlignment.Center
+HideLabel.ZIndex          = 5
+
+hover(HideBtn, Color3.fromRGB(30, 38, 55), Color3.fromRGB(45, 55, 80))
+
+HideBtn.MouseButton1Click:Connect(function()
+    deltaHidden = not deltaHidden
+    setDeltaVisible(not deltaHidden)
+
+    if deltaHidden then
+        -- Show red "hidden" state
+        HideIcon.Text             = "🚫"
+        HideLabel.Text            = "SHOW"
+        HideBtn.BackgroundColor3  = Color3.fromRGB(60, 25, 25)
+        HideIcon.TextColor3       = Color3.fromRGB(220, 100, 100)
+        HideLabel.TextColor3      = Color3.fromRGB(220, 100, 100)
+    else
+        -- Restore normal state
+        HideIcon.Text             = "👁"
+        HideLabel.Text            = "HIDE"
+        HideBtn.BackgroundColor3  = Color3.fromRGB(30, 38, 55)
+        HideIcon.TextColor3       = THEME.TEXT_SIDEBAR
+        HideLabel.TextColor3      = THEME.TEXT_SIDEBAR
+    end
+end)
+
+-- Also expose as keybind: RightAlt toggles Delta visibility
+UIS.InputBegan:Connect(function(inp, gameProcessed)
+    if gameProcessed then return end
+    if inp.KeyCode == Enum.KeyCode.RightAlt then
+        HideBtn.MouseButton1Click:Fire()
+    end
+end)
+
+-- ══════════════════════════════════════════════
+--  ENTRANCE ANIMATION
+-- ══════════════════════════════════════════════
+Window.BackgroundTransparency = 1
+Shadow.BackgroundTransparency = 1
+task.delay(0.04, function()
+    TweenService:Create(Window, TweenInfo.new(0.22, Enum.EasingStyle.Quad), {BackgroundTransparency = 0}):Play()
+    TweenService:Create(Shadow, TweenInfo.new(0.22, Enum.EasingStyle.Quad), {BackgroundTransparency = 0.6}):Play()
+end)
+
+print("[Delta] UI loaded. Press RightAlt to toggle Delta visibility.")
+return ScreenGui
